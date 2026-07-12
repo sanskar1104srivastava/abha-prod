@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker version *)",
+      "Bash(docker info *)",
+      "Bash(grep -n \"def common_headers\" -A 15 /d/Abha-Integration/backend/abdm_client.py)",
+      "Read(//d/Abha-Integration/backend/**)",
+      "Bash(grep -n \"def ecdh_decrypt\\\\|def ecdh_encrypt\\\\|def _derive\" -A 40 /d/Abha-Integration/backend/abdm_client.py | head -120)",
+      "Bash(sed -n '459,500p' /d/Abha-Integration/backend/abdm_client.py)",
+      "Bash(grep -n \"def iso_timestamp\" -A 4 /d/Abha-Integration/backend/abdm_client.py)"
+    ]
+  }
+}

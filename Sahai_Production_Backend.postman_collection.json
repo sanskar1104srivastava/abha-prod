@@ -1,0 +1,1091 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Sahai Production Backend",
+    "description": "Complete API reference for the Sahai Production Backend.\n\n**Auth:**\n  All customer requests require: Authorization: Bearer {{apiKey}}\n  Admin requests require: Authorization: Bearer {{adminKey}}\n\n**Variable chain (auto-saved where noted):**\n  Login → apiKey\n  Aadhaar Request OTP → txnId\n  Aadhaar Verify OTP → txnId, xToken, abhaAddress\n  Mobile Request OTP → txnId\n  PHR Send OTP → txnId\n  PHR Verify OTP → phrToken\n  Request Link Token → trackingId, requestId\n  Link OTP Init → transactionId\n  Request Consent → trackingId, consentRequestId\n  Request Health Information → trackingId\n  linkToken and consentId arrive at your webhook as raw ABDM bodies — parse and paste manually\n\n**hospitalId is derived from your API key** — never pass it in requests. hipId (linking) and hiuId (consent/health-info) are per-request fields; when hiuId is omitted, the HIU ID registered with your API key is used.\n**ABDM tokens are managed automatically** — no manual token handling required.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://4sdj5gmx8g.execute-api.ap-south-1.amazonaws.com", "type": "string" },
+    { "key": "apiKey", "value": "", "type": "string" },
+    { "key": "adminKey", "value": "", "type": "string" },
+    { "key": "hipId", "value": "IN0910033701", "type": "string" },
+    { "key": "hiuId", "value": "IN0910033701", "type": "string" },
+    { "key": "txnId", "value": "", "type": "string" },
+    { "key": "xToken", "value": "", "type": "string" },
+    { "key": "phrToken", "value": "", "type": "string" },
+    { "key": "abhaAddress", "value": "", "type": "string" },
+    { "key": "abhaNumber", "value": "", "type": "string" },
+    { "key": "patientReference", "value": "PAT-001", "type": "string" },
+    { "key": "careContextRef", "value": "VISIT-001", "type": "string" },
+    { "key": "trackingId", "value": "", "type": "string" },
+    { "key": "requestId", "value": "", "type": "string" },
+    { "key": "transactionId", "value": "", "type": "string" },
+    { "key": "linkToken", "value": "", "type": "string" },
+    { "key": "consentId", "value": "", "type": "string" },
+    { "key": "consentRequestId", "value": "", "type": "string" },
+    { "key": "requesterName", "value": "Dr. Ayesha Khan", "type": "string" },
+    { "key": "requesterType", "value": "REGNO", "type": "string" },
+    { "key": "requesterValue", "value": "MH12345", "type": "string" },
+    { "key": "requesterSystem", "value": "https://www.mciindia.org", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "00 - Credentials & Webhook",
+      "description": "Health check, login, API key management, and webhook setup.",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/v1/health", "host": ["{{baseUrl}}"], "path": ["v1", "health"] },
+            "description": "Verify the API is reachable. No auth required."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["v1", "auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginId\": \"your_login_id\",\n  \"password\": \"your_password\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Verify credentials. Does not issue or rotate the API key — use the key issued at registration for all requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["v1", "auth", "me"] },
+            "description": "Returns hospital profile: hospitalId, hipId, hiuId, webhookUrl, dataPushUrl, environment."
+          },
+          "response": []
+        },
+        {
+          "name": "Rotate API Key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.apiKey) { pm.collectionVariables.set('apiKey', j.apiKey); console.log('apiKey saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/auth/rotate-key", "host": ["{{baseUrl}}"], "path": ["v1", "auth", "rotate-key"] },
+            "description": "Issue a new API key. Current key is immediately revoked. New key auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Webhook Endpoint",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/webhook-endpoint", "host": ["{{baseUrl}}"], "path": ["v1", "webhook-endpoint"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"webhookUrl\": \"https://your-system.example.com/abdm/events\",\n  \"webhookSecret\": \"your-32-char-minimum-webhook-secret\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Register the HTTPS endpoint where Sahai will POST raw ABDM callbacks.\n\nEvery request includes:\n  X-Abdm-Path: the ABDM callback path (e.g. /v0.5/hip/link/on-add-contexts)\n  X-Abdm-Signature: HMAC-SHA256(webhookSecret, rawBody)\n\nThe body is the raw ABDM JSON exactly as received — no envelope added.\nVerify X-Abdm-Signature before processing."
+          },
+          "response": []
+        },
+        {
+          "name": "Test Webhook Endpoint",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/webhook-endpoint/test", "host": ["{{baseUrl}}"], "path": ["v1", "webhook-endpoint", "test"] },
+            "description": "Send a TEST event to your configured webhook URL. Returns the HTTP status your server returned."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 - Admin",
+      "description": "Operator-only endpoints. Requires Authorization: Bearer {{adminKey}}.",
+      "item": [
+        {
+          "name": "Create Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/admin/customers", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "customers"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginId\": \"hospital_name\",\n  \"password\": \"Secure@1234!\",\n  \"hospitalName\": \"Hospital Name\",\n  \"hipId\": \"{{hipId}}\",\n  \"hiuId\": \"{{hipId}}\",\n  \"webhookUrl\": \"https://your-system.example.com/abdm/events\",\n  \"webhookSecret\": \"your-32-char-minimum-webhook-secret\",\n  \"dataPushUrl\": \"https://your-system.example.com/abdm/data\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a new hospital account. Generates an API key and registers the ABDM bridge. Raw API key is returned once — save it.\n\nwebhookUrl/webhookSecret/dataPushUrl are optional here and can be set later via PUT /v1/webhook-endpoint and PUT /v1/data-push-endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Bridge Callback URL",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/admin/bridge/callback-url", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "bridge", "callback-url"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"callbackUrl\": \"https://your-callback.example.com/callback\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update the ABDM gateway callback URL for this bridge. Run once per environment."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Bridge Services",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/admin/bridge/register-services", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "bridge", "register-services"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"facilityId\": \"{{hipId}}\",\n  \"facilityName\": \"Hospital Name\",\n  \"hrp\": [\n    {\n      \"id\": \"{{hipId}}\",\n      \"name\": \"Hospital Name\",\n      \"type\": \"HIP\",\n      \"isActive\": true,\n      \"endpoints\": [\n        { \"use\": \"KYC_AND_LINKING\", \"type\": \"FHIR\", \"bridge\": \"https://your-callback.example.com/callback\" }\n      ]\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Register or update HIP/HIU services in the ABDM facility registry. hrp is the list of HRP service objects registered under this bridge."
+          },
+          "response": []
+        },
+        {
+          "name": "List Bridge Services",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/admin/bridge/services", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "bridge", "services"] },
+            "description": "List all services registered under this bridge with the ABDM gateway."
+          },
+          "response": []
+        },
+        {
+          "name": "Test ABDM Token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/admin/abdm/test-token", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "abdm", "test-token"] },
+            "description": "Diagnostic: attempt a live ABDM gateway token fetch and return full detail. If successful, the token is cached immediately."
+          },
+          "response": []
+        },
+        {
+          "name": "Set ABDM Gateway Token (manual inject)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/admin/abdm/gateway-token", "host": ["{{baseUrl}}"], "path": ["v1", "admin", "abdm", "gateway-token"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"<paste-abdm-token-here>\",\n  \"expiresIn\": 3600\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Manually inject an ABDM gateway token. Use when auto-fetch is blocked (e.g., sandbox WAF issue)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 - ABHA Enrollment (Registration)",
+      "description": "Create a new ABHA account. Skip entirely if the patient already has an ABHA address.\n\nFlow: Aadhaar Request OTP → Aadhaar Verify OTP → (optional) Address Suggestions → Set Address\nAlternative mobile-only flow: Mobile Request OTP → Mobile Verify OTP",
+      "item": [
+        {
+          "name": "Enroll – Aadhaar Request OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved:', j.txnId); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/enroll/aadhaar/request-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "enroll", "aadhaar", "request-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"aadhaar\": \"999941057058\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Step 1: Sends OTP to the mobile linked to the patient's Aadhaar. txnId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Enroll – Aadhaar Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId)  { pm.collectionVariables.set('txnId',  j.txnId);  console.log('txnId saved'); }",
+                  "  if (j.xToken) { pm.collectionVariables.set('xToken', j.xToken); console.log('xToken saved'); }",
+                  "  var abha = (j.ABHAProfile && j.ABHAProfile.abhaAddress) || j.abhaAddress || '';",
+                  "  if (abha) { pm.collectionVariables.set('abhaAddress', abha); console.log('abhaAddress saved:', abha); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/enroll/aadhaar/verify-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "enroll", "aadhaar", "verify-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"otp\": \"123456\",\n  \"mobile\": \"9876543210\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Step 2: Creates ABHA account. mobile is required by ABDM. txnId, xToken, abhaAddress auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Get ABHA Address Suggestions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/address/suggestions", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "address", "suggestions"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Step 3 (optional): Get suggested ABHA address options based on the patient's name."
+          },
+          "response": []
+        },
+        {
+          "name": "Set ABHA Address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  var abha = j.abhaAddress || j.preferredAbhaAddress || '';",
+                  "  if (abha) { pm.collectionVariables.set('abhaAddress', abha); console.log('abhaAddress saved:', abha); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/address/set", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "address", "set"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"abhaAddress\": \"rahulsharma@sbx\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Step 4: Finalise the chosen ABHA address. abhaAddress auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Enroll – Mobile Request OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/enroll/mobile/request-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "enroll", "mobile", "request-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"9999999999\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Mobile-only enrollment: request OTP. txnId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Enroll – Mobile Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/enroll/mobile/verify-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "enroll", "mobile", "verify-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"otp\": \"123456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Mobile-only enrollment: verify OTP. Returns linked ABHA accounts."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - ABHA Lookup (Direct, No OTP)",
+      "description": "Look up existing ABHA profiles directly — no OTP required.\n\nUse by-mobile or by-abha-number for basic profile info.\nUse PHR Send OTP → PHR Verify OTP to get a phrToken for full profile access.",
+      "item": [
+        {
+          "name": "Search ABHA by Mobile",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/search/by-mobile", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "search", "by-mobile"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"9999999999\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Find all ABHA accounts linked to a mobile number. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "Search ABHA by Number",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/search/by-abha-number", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "search", "by-abha-number"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaNumber\": \"91234567890123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Look up ABHA profile by 14-digit ABHA number. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Search (by ABHA Address)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/phr/search", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "search"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Check whether an ABHA address exists in the PHR system. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Send OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/phr/send-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "send-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"txnId\": \"\",\n  \"otpSystem\": \"abdm\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Send OTP for PHR-based patient login (ABHA address flow). txnId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.phrToken) { pm.collectionVariables.set('phrToken', j.phrToken); console.log('phrToken saved'); }",
+                  "  if (j.txnId)    { pm.collectionVariables.set('txnId',    j.txnId);    console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/phr/verify-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "verify-otp"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"otp\": \"123456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Verify PHR OTP. Returns phrToken — auto-saved. Use phrToken as xToken for profile/card/qr endpoints."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 - ABHA Profile",
+      "description": "Fetch full profile, health card PDF, or QR code. Requires xToken from enrollment (enroll/aadhaar/verify-otp) or phrToken from PHR Verify OTP.",
+      "item": [
+        {
+          "name": "Get ABHA Profile Details",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/profile/details", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "profile", "details"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xToken\": \"{{xToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Fetch full ABHA profile. xToken from enroll/aadhaar/verify-otp or phrToken from phr/verify-otp."
+          },
+          "response": []
+        },
+        {
+          "name": "Download ABHA Card (PDF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/profile/card", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "profile", "card"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xToken\": \"{{xToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Returns binary PDF of the ABHA health card. In Postman set response type to 'Send and Download'."
+          },
+          "response": []
+        },
+        {
+          "name": "Download ABHA QR Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/abha/profile/qr-code", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "profile", "qr-code"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"xToken\": \"{{xToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Returns binary PNG of the ABHA QR code."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 - Care Context Linking",
+      "description": "HIP-initiated and user-initiated care context linking.\n\nHIP-initiated flow: Request Link Token → (wait for webhook linkToken) → Link Care Contexts → Notify Care Context Linked\nUser-initiated flow: Fetch Auth Modes → Link OTP Init → Link OTP Confirm → (webhook delivers linkToken) → Link Care Contexts",
+      "item": [
+        {
+          "name": "Request Link Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.trackingId) { pm.collectionVariables.set('trackingId', j.trackingId); console.log('trackingId saved:', j.trackingId); }",
+                  "  if (j.requestId)  { pm.collectionVariables.set('requestId',  j.requestId);  console.log('requestId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "Idempotency-Key", "value": "lt-{{$guid}}", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/link-token", "host": ["{{baseUrl}}"], "path": ["v1", "link-token"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hipId\": \"{{hipId}}\",\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"abhaNumber\": \"{{abhaNumber}}\",\n  \"patientReference\": \"{{patientReference}}\",\n  \"name\": \"Rahul Sharma\",\n  \"gender\": \"M\",\n  \"yearOfBirth\": 1990,\n  \"purpose\": \"LINK_CARE_CONTEXT\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Request a linkToken from ABDM. Token is delivered to your webhook as a CALLBACK_RECEIVED event. trackingId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Poll Status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/status/{{trackingId}}", "host": ["{{baseUrl}}"], "path": ["v1", "status", "{{trackingId}}"] },
+            "description": "Poll for async operation result. Works for link-token, consent, and health-information requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Fetch Auth Modes",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/link/fetch-modes", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "link", "fetch-modes"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"purpose\": \"LINK\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Fetch available auth modes (MOBILE_OTP, AADHAAR_OTP) for this patient at this HIP."
+          },
+          "response": []
+        },
+        {
+          "name": "Link OTP Init",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.transactionId) { pm.collectionVariables.set('transactionId', j.transactionId); console.log('transactionId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/link/otp-init", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "link", "otp-init"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"authMode\": \"MOBILE_OTP\",\n  \"purpose\": \"LINK\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Initiate OTP auth for user-initiated linking. ABDM sends OTP to patient's mobile. transactionId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "Link OTP Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/link/otp-confirm", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "link", "otp-confirm"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"otp\": \"123456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Confirm the patient's OTP. On success ABDM delivers a linkToken to your webhook."
+          },
+          "response": []
+        },
+        {
+          "name": "Link Care Contexts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.trackingId) { pm.collectionVariables.set('trackingId', j.trackingId); console.log('trackingId saved:', j.trackingId); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "Idempotency-Key", "value": "lnk-{{$guid}}", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/care-contexts/link", "host": ["{{baseUrl}}"], "path": ["v1", "care-contexts", "link"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hipId\": \"{{hipId}}\",\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"abhaNumber\": \"{{abhaNumber}}\",\n  \"patientReference\": \"{{patientReference}}\",\n  \"linkToken\": \"{{linkToken}}\",\n  \"careContexts\": [\n    {\n      \"reference\": \"{{careContextRef}}\",\n      \"display\": \"OPD Visit - 2026\",\n      \"hiTypes\": [\"OPConsultation\"],\n      \"clinicalPayload\": {}\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Link care contexts to the patient's ABHA using the linkToken from the webhook.\n\nhiTypes — use FHIR resource names:\n  OPConsultation | DiagnosticReport | DischargeSummary | Prescription\n  ImmunizationRecord | WellnessRecord | HealthDocumentRecord | Invoice\n\nStructured mode: set clinicalPayload to your FHIR resource dict.\nPDF mode: set documentData (base64 PDF), documentTitle, documentContentType: 'application/pdf'."
+          },
+          "response": []
+        },
+        {
+          "name": "Notify Care Context Linked",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/link/care-context/notify", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "link", "care-context", "notify"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"patientReference\": \"{{patientReference}}\",\n  \"careContextReference\": \"{{careContextRef}}\",\n  \"hiTypes\": [\"OPConsultation\"],\n  \"linkToken\": \"{{linkToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Notify ABDM that a care context has been linked. Call after Link Care Contexts succeeds."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Deep-Link SMS",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/sms-notify", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "sms-notify"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNo\": \"+919999999999\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Send a deep-link SMS so the patient can open the ABDM app on the linking screen. Include country code prefix."
+          },
+          "response": []
+        },
+        {
+          "name": "Respond – Patient Discovery",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/user-linking/on-discover", "host": ["{{baseUrl}}"], "path": ["v1", "user-linking", "on-discover"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{requestId}}\",\n  \"transactionId\": \"{{transactionId}}\",\n  \"patient\": {\n    \"referenceNumber\": \"{{patientReference}}\",\n    \"display\": \"Rahul Sharma\",\n    \"careContexts\": [\n      { \"referenceNumber\": \"{{careContextRef}}\", \"display\": \"OPD 2024-01-15\" }\n    ],\n    \"matchedBy\": [\"MOBILE\"]\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP response to ABDM patient discovery. Call after receiving a discovery webhook and identifying the matching patient."
+          },
+          "response": []
+        },
+        {
+          "name": "Respond – Link Init",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/user-linking/on-init", "host": ["{{baseUrl}}"], "path": ["v1", "user-linking", "on-init"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{requestId}}\",\n  \"transactionId\": \"{{transactionId}}\",\n  \"link\": {\n    \"referenceNumber\": \"{{patientReference}}\",\n    \"type\": \"MOBILE_OTP\",\n    \"count\": 1,\n    \"expiry\": \"2027-12-31T00:00:00.000Z\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP confirms OTP has been sent in user-initiated linking. Call after receiving the link-init webhook."
+          },
+          "response": []
+        },
+        {
+          "name": "Respond – Link Confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/user-linking/on-confirm", "host": ["{{baseUrl}}"], "path": ["v1", "user-linking", "on-confirm"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{requestId}}\",\n  \"transactionId\": \"{{transactionId}}\",\n  \"patient\": {\n    \"referenceNumber\": \"{{patientReference}}\",\n    \"display\": \"Rahul Sharma\",\n    \"careContexts\": [\n      { \"referenceNumber\": \"{{careContextRef}}\", \"display\": \"OPD 2024-01-15\" }\n    ]\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP confirms the link. ABDM marks the care context as linked in the patient app."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 - Consent & Health Information",
+      "description": "HIU-side consent lifecycle and health information retrieval (Milestone 3).\n\nFlow: Request Consent → consent.granted/denied webhook arrives (notification.status + notification.consentArtefacts[]) → for EACH artefact: Fetch Consent Artefact + Request Health Information → data arrives at your registered data-push endpoint (decrypt via POST /v1/health-information/decrypt) or at Sahai (fetch via /v1/health-records/{{trackingId}}/decrypt).\n\nConsent state changes (GRANTED/DENIED/REVOKED/EXPIRED) are pushed to your webhook URL and also stored — poll GET /v1/status/{{trackingId}}.",
+      "item": [
+        {
+          "name": "Request Consent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.trackingId)       { pm.collectionVariables.set('trackingId',       j.trackingId);       console.log('trackingId saved'); }",
+                  "  var consentRequestId = j.consentRequestId || j.requestId || '';",
+                  "  if (consentRequestId) { pm.collectionVariables.set('consentRequestId', consentRequestId); console.log('consentRequestId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "Idempotency-Key", "value": "con-{{$guid}}", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/consents", "host": ["{{baseUrl}}"], "path": ["v1", "consents"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"patientReference\": \"{{patientReference}}\",\n  \"hiuId\": \"{{hiuId}}\",\n  \"purpose\": {\n    \"text\": \"Care Management\",\n    \"code\": \"CAREMGT\",\n    \"refUri\": \"www.abdm.gov.in\"\n  },\n  \"requester\": {\n    \"name\": \"{{requesterName}}\",\n    \"type\": \"{{requesterType}}\",\n    \"value\": \"{{requesterValue}}\",\n    \"system\": \"{{requesterSystem}}\"\n  },\n  \"hiTypes\": [\"OPConsultation\", \"Prescription\"],\n  \"dateRange\": {\n    \"from\": \"2020-01-01T00:00:00.000Z\",\n    \"to\": \"{{$isoTimestamp}}\"\n  },\n  \"permission\": {\n    \"accessMode\": \"VIEW\",\n    \"dateRange\": {\n      \"from\": \"2020-01-01T00:00:00.000Z\",\n      \"to\": \"{{$isoTimestamp}}\"\n    },\n    \"dataEraseAt\": \"2027-12-31T00:00:00.000Z\",\n    \"frequency\": { \"unit\": \"HOUR\", \"value\": 1, \"repeats\": 0 }\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Request patient consent. Patient acts on the ABDM app. trackingId and consentRequestId auto-saved.\n\npatientReference — required hospital-side patient identifier; used in consent webhooks and decrypt responses to map ABDM data back to the correct patient record.\n\nhiuId — HIU ID for this request. Optional: falls back to the HIU ID registered with your API key when omitted.\n\nrequester — identity of the clinician/system initiating this specific request (name + identifier type/value/system). Required per request; set the requesterName/Type/Value/System variables or edit inline.\n\npurpose.refUri — must not be empty; ABDM rejects it (ABDM-9999 Invalid consent purpose refURI). www.abdm.gov.in is the standard value.\n\nIf dispatch to ABDM fails, GET /v1/status/{{trackingId}} shows dispatchFailed with ABDM's exact rejection under details.upstream."
+          },
+          "response": []
+        },
+        {
+          "name": "Poll Status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/status/{{trackingId}}", "host": ["{{baseUrl}}"], "path": ["v1", "status", "{{trackingId}}"] },
+            "description": "Poll until consent status = GRANTED or DENIED."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Consent Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/consents/status", "host": ["{{baseUrl}}"], "path": ["v1", "consents", "status"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consentRequestId\": \"{{consentRequestId}}\",\n  \"hiuId\": \"{{hiuId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Direct ABDM query for consent status — use when you need it immediately without waiting for a webhook."
+          },
+          "response": []
+        },
+        {
+          "name": "Fetch Consent Artefact",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/consents/fetch", "host": ["{{baseUrl}}"], "path": ["v1", "consents", "fetch"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consentId\": \"{{consentId}}\",\n  \"hiuId\": \"{{hiuId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Fetch full consent artefact. consentId comes from the consent.granted webhook — paste into {{consentId}}.\n\nIMPORTANT: a granted consent can carry MULTIPLE artefacts (notification.consentArtefacts[] — typically one per HIP). Loop this call and Request Health Information once per artefact ID to collect the patient's complete data."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Data Push Endpoint",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/data-push-endpoint", "host": ["{{baseUrl}}"], "path": ["v1", "data-push-endpoint"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataPushUrl\": \"https://your-system.example.com/abdm/data\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Register the HTTPS endpoint where the HIP pushes encrypted health information directly to your system.\n\nOnce set, Request Health Information uses this URL automatically (no dataPushUrl needed in the body) and the encrypted FHIR payload is delivered straight to you — Sahai never stores it.\n\nDecrypt the received payload with POST /v1/health-information/decrypt — the ECDH keys stay at Sahai.\n\nIf you never set this, data is pushed to Sahai's own /data endpoint, decrypted there, and fetched via GET /v1/health-records/{{trackingId}}/decrypt."
+          },
+          "response": []
+        },
+        {
+          "name": "Request Health Information",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.trackingId) { pm.collectionVariables.set('trackingId', j.trackingId); console.log('trackingId saved:', j.trackingId); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "Idempotency-Key", "value": "hi-{{$guid}}", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/health-information", "host": ["{{baseUrl}}"], "path": ["v1", "health-information"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consentId\": \"{{consentId}}\",\n  \"hiuId\": \"{{hiuId}}\",\n  \"dateRange\": {\n    \"from\": \"2020-01-01T00:00:00.000Z\",\n    \"to\": \"2027-12-31T00:00:00.000Z\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Initiate health data pull from HIP. trackingId auto-saved.\n\nECDH key material is generated by Sahai automatically — do not pass keyMaterial.\n\nWhere the HIP pushes the encrypted data (resolved in this order):\n1. dataPushUrl in this body (optional override)\n2. Your registered data-push endpoint (PUT /v1/data-push-endpoint) — data goes straight to you, Sahai never stores it; decrypt via POST /v1/health-information/decrypt\n3. Sahai's own /data endpoint — Sahai decrypts and stores; fetch via GET /v1/health-records/{{trackingId}}/decrypt"
+          },
+          "response": []
+        },
+        {
+          "name": "Decrypt Health Information (Direct Push)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/health-information/decrypt", "host": ["{{baseUrl}}"], "path": ["v1", "health-information", "decrypt"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"entries\": [\n    {\n      \"content\": \"<base64-ciphertext-from-hip-push>\",\n      \"media\": \"application/fhir+json\",\n      \"careContextReference\": \"{{careContextRef}}\"\n    }\n  ],\n  \"keyMaterial\": {\n    \"cryptoAlg\": \"ECDH\",\n    \"curve\": \"Curve25519\",\n    \"dhPublicKey\": {\n      \"keyValue\": \"<dhPublicKey.keyValue-from-hip-push>\"\n    },\n    \"nonce\": \"<nonce-from-hip-push>\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypt an encrypted data push you received directly at your registered data-push endpoint.\n\nForward the HIP's push payload unchanged: transactionId (or consentId), entries, and keyMaterial exactly as received. Sahai looks up the matching ECDH key session (scoped to your hospital), decrypts, and returns the FHIR bundles in the response.\n\nKeys never leave Sahai; decrypted data is not stored by Sahai. Every call is written to the access-audit trail.\n\nNote: key sessions expire with the request log (30 days). Decrypt promptly after receiving a push."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Health Record Result",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/health-records/{{trackingId}}", "host": ["{{baseUrl}}"], "path": ["v1", "health-records", "{{trackingId}}"] },
+            "description": "Check whether health data has arrived for a health-information request.\n\nStatuses: pending (not arrived), dispatchFailed (ABDM call failed — details included), encryptedStored (arrived, nothing decrypted), decrypted (record summaries in result.records).\n\n404 = unknown trackingId for this hospital. Applies to the Sahai data-push path — with a registered data-push endpoint the data goes directly to you instead."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Decrypted Health Records",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/health-records/{{trackingId}}/decrypt", "host": ["{{baseUrl}}"], "path": ["v1", "health-records", "{{trackingId}}", "decrypt"] },
+            "description": "Fetch the decrypted FHIR bundles for a health-information request (Sahai data-push path).\n\n404 with a clear message = data not arrived yet or unknown trackingId. 424 DATA_DECRYPTION_FAILED = data arrived but could not be decrypted (per-entry errors included). Entries whose stored content fails to load carry an error field (readErrorCount > 0).\n\nEvery successful call is written to the access-audit trail."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 - HIP Responses",
+      "description": "HIP-side acknowledgements sent back to ABDM. Sahai handles most of these automatically — use only for explicit control.",
+      "item": [
+        {
+          "name": "HIP Consent Acknowledgement",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/consent/on-notify", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "consent", "on-notify"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consentId\": \"{{consentId}}\",\n  \"status\": \"OK\",\n  \"requestId\": \"{{requestId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP sends acknowledgement to ABDM after receiving a consent notification."
+          },
+          "response": []
+        },
+        {
+          "name": "HIP Health Info Acknowledgement",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/hip/health-information/on-request", "host": ["{{baseUrl}}"], "path": ["v1", "hip", "health-information", "on-request"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"{{transactionId}}\",\n  \"sessionStatus\": \"ACKNOWLEDGED\",\n  \"requestId\": \"{{requestId}}\",\n  \"careContextReferences\": [\"{{careContextRef}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP acknowledges a health-information request. Sahai handles this automatically — use only for explicit control."
+          },
+          "response": []
+        },
+        {
+          "name": "Scan & Share – On-Share",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
+              { "key": "Content-Type", "value": "application/json", "type": "text" }
+            ],
+            "url": { "raw": "{{baseUrl}}/v1/share/on-share", "host": ["{{baseUrl}}"], "path": ["v1", "share", "on-share"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"{{requestId}}\",\n  \"status\": \"SUCCESS\",\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"tokenNumber\": \"T-001\",\n  \"expiry\": \"\",\n  \"context\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "HIP acknowledges a scan-and-share patient profile share. Optionally return a token number to the patient via the ABDM app."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 - Webhook Event Reference",
+      "description": "Reference for raw ABDM callbacks Sahai forwards to your endpoint. Documentation only.",
+      "item": [
+        {
+          "name": "Webhook Event Reference",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
+            "url": { "raw": "{{baseUrl}}/v1/webhook-endpoint/test", "host": ["{{baseUrl}}"], "path": ["v1", "webhook-endpoint", "test"] },
+            "description": "Sahai forwards raw ABDM callback bodies to your webhookUrl with no envelope or transformation.\n\nHeaders on every request:\n  X-Abdm-Path: <abdm-callback-path>   (e.g. /v0.5/hip/link/on-add-contexts)\n  X-Abdm-Signature: HMAC-SHA256(webhookSecret, rawBody)\n  Content-Type: application/json\n\nVerify: HMAC-SHA256(webhookSecret, rawBody) == X-Abdm-Signature\n\n--- Link Token (HIP-initiated linking) ---\nX-Abdm-Path: /v0.5/users/auth/on-fetch-modes  (auth mode fetch)\nX-Abdm-Path: /v0.5/users/auth/on-init          (OTP sent)\nX-Abdm-Path: /v0.5/users/auth/on-confirm       (linkToken delivered)\nbody.auth.accessToken → this is the linkToken, paste as {{linkToken}}\n\n--- User-initiated linking ---\nX-Abdm-Path: /v0.5/hip/link/carecontext/on-discover\nX-Abdm-Path: /v0.5/hip/link/on-init\nX-Abdm-Path: /v0.5/hip/link/on-confirm         (linkToken in body.acknowledgement)\n\n--- Consent ---\nX-Abdm-Path: /v0.5/consent/hiu/notify\nbody.notification.status = GRANTED | DENIED | REVOKED | EXPIRED\nbody.notification.consentArtefacts[0].id → paste as {{consentId}}\n\n--- Health Information (HIP-side) ---\nX-Abdm-Path: /v0.5/health-information/hip/request\nbody.hiRequest.dataPushUrl → where you must push encrypted FHIR data\nbody.hiRequest.keyMaterial  → HIU public key to encrypt data with\nbody.hiRequest.consent.id   → consentId\nbody.transactionId          → use in your on-request acknowledgement\n\n--- Scan & Share ---\nX-Abdm-Path: /v0.5/hip/patient/share/profile\nbody.profile → patient demographics shared from ABDM app"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

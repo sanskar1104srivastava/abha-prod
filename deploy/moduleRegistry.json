@@ -1,0 +1,124 @@
+{
+  "aws": {
+    "profile": "algoflow",
+    "region": "ap-south-1"
+  },
+  "packageType": "Image",
+  "environments": {
+    "dev": {
+      "appEnv": "dev",
+      "secretName": "sahai/production-backend/dev",
+      "lambdaNamePrefix": "sahai-dev",
+      "lambdaExecutionRoleName": "sahai-production-backend-dev-lambda-role",
+      "imageTag": "dev"
+    },
+    "prod": {
+      "appEnv": "prod",
+      "secretName": "sahai/production-backend/prod",
+      "lambdaNamePrefix": "sahai-prod",
+      "lambdaExecutionRoleName": "sahai-production-backend-prod-lambda-role",
+      "imageTag": "prod"
+    }
+  },
+  "apiGateway": {
+    "routes": [
+      {
+        "method": "ANY",
+        "path": "/v1/{proxy+}",
+        "module": "externalApi"
+      },
+      {
+        "method": "ANY",
+        "path": "/callback/{proxy+}",
+        "module": "callbackRouter"
+      },
+      {
+        "method": "POST",
+        "path": "/data",
+        "module": "dataFlow"
+      },
+      {
+        "method": "ANY",
+        "path": "/data/{proxy+}",
+        "module": "dataFlow"
+      }
+    ]
+  },
+  "dynamoTables": [
+    "sahaiHospitalTenants",
+    "sahaiApiKeys",
+    "sahaiPatients",
+    "sahaiCareContexts",
+    "sahaiRequestLog",
+    "sahaiStatusStore",
+    "sahaiWebhookEvents",
+    "sahaiHealthRecords"
+  ],
+  "queues": [
+    "sahaiWebhookEventsQueue",
+    "sahaiWebhookEventsDlq",
+    "sahaiDataFlowJobsQueue",
+    "sahaiDataFlowJobsDlq",
+    "sahaiAbdmCallbacksQueue",
+    "sahaiAbdmCallbacksDlq"
+  ],
+  "modules": {
+    "externalApi": {
+      "modulePath": "modules/externalApi",
+      "ecrRepository": "sahai-production-external-api",
+      "lambdaNameSuffix": "external-api",
+      "memory": 1024,
+      "timeout": 30,
+      "routes": [
+        "ANY /v1/{proxy+}"
+      ],
+      "env": {}
+    },
+    "callbackRouter": {
+      "modulePath": "modules/callbackRouter",
+      "ecrRepository": "sahai-production-callback-router",
+      "lambdaNameSuffix": "callback-router",
+      "memory": 1024,
+      "timeout": 30,
+      "routes": [
+        "ANY /callback/{proxy+}"
+      ],
+      "env": {
+        "callbackBodyBucket": "sahai-production-callback-bodies"
+      }
+    },
+    "dataFlow": {
+      "modulePath": "modules/dataFlow",
+      "ecrRepository": "sahai-production-data-flow",
+      "lambdaNameSuffix": "data-flow",
+      "memory": 2048,
+      "timeout": 120,
+      "routes": [
+        "POST /data",
+        "ANY /data/{proxy+}"
+      ],
+      "env": {
+        "encryptedRecordsBucket": "sahai-production-encrypted-records",
+        "decryptedRecordsBucket": "sahai-production-decrypted-records"
+      }
+    },
+    "webhookDispatcher": {
+      "modulePath": "modules/webhookDispatcher",
+      "ecrRepository": "sahai-production-webhook-dispatcher",
+      "lambdaNameSuffix": "webhook-dispatcher",
+      "memory": 512,
+      "timeout": 30,
+      "eventSource": "sahaiWebhookEventsQueue",
+      "env": {}
+    },
+    "abdmCallbackConsumer": {
+      "modulePath": "modules/abdmCallbackConsumer",
+      "ecrRepository": "sahai-production-abdm-callback-consumer",
+      "lambdaNameSuffix": "abdm-callback-consumer",
+      "memory": 512,
+      "timeout": 30,
+      "eventSource": "sahaiAbdmCallbacksQueue",
+      "env": {}
+    }
+  }
+}
