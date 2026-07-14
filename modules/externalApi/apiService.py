@@ -198,8 +198,10 @@ class ExternalApiService:
                 idempotencyPayload.pop(key, None)
         payload = dict(idempotencyPayload)
         privateKeyB64, publicKeyB64, nonceB64 = AbdmCryptoService.generateFideliusEcdhKeypair()
+        requestId = AbdmCryptoService.newRequestId()
         transactionId = payload.get("transactionId") or AbdmCryptoService.newRequestId()
-        correlation = {"consentId": payload["consentId"], "transactionId": transactionId}
+        correlation = {"requestId": requestId, "consentId": payload["consentId"], "transactionId": transactionId}
+        payload["requestId"] = requestId
         payload["transactionId"] = transactionId
         # 24h expiry — HIPs often push well after an hour; an expired key makes them refuse the request
         payload["keyMaterial"] = AbdmCryptoService.keyMaterial(publicKeyB64, nonceB64, DateTimeUtils.utcIsoAfter(hours=24))
@@ -405,10 +407,17 @@ class ExternalApiService:
                     "keyMaterial": keyMaterial,
                 }
             }
-            await self.abdmClient.hiuPost("healthInformationRequest", abdmPayload, hiuId=hiuId)
+            requestId = str(payload.get("requestId") or "")
+            extraHeaders = {"REQUEST-ID": requestId} if requestId else None
+            await self.abdmClient.hiuPost("healthInformationRequest", abdmPayload, extraHeaders=extraHeaders, hiuId=hiuId)
             self.requestLogService.updateStatus(
                 hospitalId, trackingId, "dispatched", EventType.HEALTH_INFORMATION_REQUESTED.value,
-                {"step": "healthInfoRequest", "transactionId": str(payload.get("transactionId") or ""), "dataPushTarget": dataPushTarget}
+                {
+                    "step": "healthInfoRequest",
+                    "requestId": requestId,
+                    "transactionId": str(payload.get("transactionId") or ""),
+                    "dataPushTarget": dataPushTarget,
+                }
             )
         except Exception as exc:
             self.logger.logError("dispatchHealthInfoRequestFailed", exc, hospitalId=hospitalId, trackingId=trackingId, upstream=getattr(exc, "details", None))

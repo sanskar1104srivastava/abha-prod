@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictRequest(BaseModel):
@@ -36,6 +36,33 @@ class AbhaAddressSetRequest(StrictRequest):
     txnId: str = Field(min_length=1)
     abhaAddress: str = Field(min_length=1, max_length=100)
 
+
+
+class AbhaLookupRequest(StrictRequest):
+    """Start an ABHA lookup — send OTP to the mobile or Aadhaar-linked mobile. Exactly one identifier."""
+    mobile: str = Field(default="")
+    aadhaar: str = Field(default="")
+
+    @model_validator(mode="after")
+    def _validateExactlyOneIdentifier(self) -> "AbhaLookupRequest":
+        if bool(self.mobile) == bool(self.aadhaar):
+            raise ValueError("Provide exactly one of 'mobile' or 'aadhaar'")
+        if self.mobile and not (len(self.mobile) == 10 and self.mobile.isdigit()):
+            raise ValueError("mobile must be a 10-digit number")
+        if self.aadhaar and not (len(self.aadhaar) == 12 and self.aadhaar.isdigit()):
+            raise ValueError("aadhaar must be a 12-digit number")
+        return self
+
+
+class AbhaLookupVerifyRequest(StrictRequest):
+    """Verify the lookup OTP; returns the full ABHA profile.
+
+    otp is omitted only on the account-selection follow-up call (txnId + abhaNumber)
+    after a first verify reported multiple linked accounts.
+    """
+    txnId: str = Field(min_length=1)
+    otp: str = Field(default="", max_length=8)
+    abhaNumber: str = Field(default="", max_length=17)
 
 
 class AbhaMobileSearchRequest(StrictRequest):

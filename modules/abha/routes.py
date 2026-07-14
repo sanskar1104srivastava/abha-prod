@@ -12,6 +12,8 @@ from modules.abha.requests import (
     AadhaarOtpRequest,
     AadhaarVerifyOtpRequest,
     AbhaAddressSetRequest,
+    AbhaLookupRequest,
+    AbhaLookupVerifyRequest,
     AbhaMobileSearchRequest,
     AbhaNumberSearchRequest,
     AbhaProfileRequest,
@@ -79,6 +81,22 @@ async def setAbhaAddress(request: Request, requestBody: AbhaAddressSetRequest) -
     _authenticate(request)
     logger.logInput("setAbhaAddress", headers=dict(request.headers), body=requestBody.model_dump(mode="json"))
     return await apiService.setAbhaAddress(requestBody)
+
+
+@router.post("/v1/abha/lookup")
+async def abhaLookup(request: Request, requestBody: AbhaLookupRequest) -> dict[str, Any]:
+    """Step 1 of ABHA lookup — accepts mobile or aadhaar and sends the OTP. Returns txnId."""
+    auth = authService.authenticate(dict(request.headers))
+    logger.logInput("abhaLookup", headers=dict(request.headers), body=requestBody.model_dump(mode="json"))
+    return await apiService.lookup(auth["hospitalId"], requestBody)
+
+
+@router.post("/v1/abha/lookup/verify")
+async def abhaLookupVerify(request: Request, requestBody: AbhaLookupVerifyRequest) -> dict[str, Any]:
+    """Step 2 of ABHA lookup — verifies the OTP and returns the full ABHA profile with xToken."""
+    auth = authService.authenticate(dict(request.headers))
+    logger.logInput("abhaLookupVerify", headers=dict(request.headers), body=requestBody.model_dump(mode="json"))
+    return await apiService.lookupVerify(auth["hospitalId"], requestBody)
 
 
 @router.post("/v1/abha/search/by-mobile")

@@ -9,6 +9,7 @@ class CallbackRoute(str, Enum):
 class CallbackJobType(str, Enum):
     HIP_HEALTH_INFORMATION_REQUEST = "hipHealthInformationRequest"
     HIU_HEALTH_INFORMATION_REQUEST = "hiuHealthInformationRequest"
+    HIU_CONSENT_FETCH = "hiuConsentFetch"
 
 
 class CallbackMatchStatus(str, Enum):

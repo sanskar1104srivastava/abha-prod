@@ -178,7 +178,6 @@ When integrating, keep the ABDM specification for the configured environment bes
 | `<newApiKey>` | Newly generated hospital API key returned by key rotation. |
 | `<createdAt>` | ISO 8601 timestamp when the hospital account was created. |
 | `<updatedAt>` | ISO 8601 timestamp when the hospital account was last updated, or null if it has not been updated. |
-| `<loginIdValue>` | Patient identifier value used for ABHA lookup; its meaning depends on `loginHint`. |
 | `<otpSystem>` | ABDM OTP system name, usually `abdm` or `aadhaar`. |
 | `<patientName>` | Patient name used for ABDM demographic matching. |
 | `<gender>` | Patient gender value expected by ABDM for demographic matching. |
@@ -895,38 +894,48 @@ Request body:
 
 Success response: Pass-through ABDM address-set response. See `ABDM Pass-Through Responses`.
 
-### 7. Existing ABHA Lookup - Request OTP
+### 7. ABHA Lookup - Send OTP
 
 ```http
-POST <baseUrl>/v1/abha/lookup/request-otp
+POST <baseUrl>/v1/abha/lookup
 Authorization: Bearer <apiKey>
 Content-Type: application/json
 ```
 
-Request body:
+Request body (exactly one of `mobile` or `aadhaar`):
 
 ```json
 {
-  "loginHint": "<loginHint>",
-  "loginId": "<loginIdValue>",
-  "otpSystem": "<otpSystem>",
-  "txnId": "<txnId>"
+  "mobile": "<mobile>"
+}
+```
+
+```json
+{
+  "aadhaar": "<aadhaar>"
 }
 ```
 
 | Field | Required | Definition |
 |---|---:|---|
-| `loginHint` | Yes | Login type: `mobile`, `aadhaar`, `abha-number`, or `abha-address`. |
-| `loginId` | Yes | Value matching `loginHint`. Backend encrypts it before sending to ABDM. |
-| `otpSystem` | No | OTP system. Usually `abdm` or `aadhaar`. Defaults to `abdm`. |
-| `txnId` | No | Existing ABDM transaction ID if continuing a session. |
+| `mobile` | One of | Patient 10-digit mobile number. OTP is sent by ABDM SMS. |
+| `aadhaar` | One of | Patient 12-digit Aadhaar number. OTP is sent to the Aadhaar-linked mobile. |
 
-Success response: Pass-through ABDM lookup OTP response. See `ABDM Pass-Through Responses`.
+The backend picks the ABDM scope and OTP system, encrypts the identifier, and calls `profile/login/request/otp`. The transaction context is remembered server-side for 15 minutes, so the verify call needs nothing besides `txnId` and `otp`.
 
-### 8. Existing ABHA Lookup - Verify OTP
+Success response:
+
+```json
+{
+  "txnId": "<txnId>",
+  "message": "OTP sent"
+}
+```
+
+### 8. ABHA Lookup - Verify OTP (returns Profile)
 
 ```http
-POST <baseUrl>/v1/abha/lookup/verify-otp
+POST <baseUrl>/v1/abha/lookup/verify
 Authorization: Bearer <apiKey>
 Content-Type: application/json
 ```
@@ -936,18 +945,38 @@ Request body:
 ```json
 {
   "txnId": "<txnId>",
-  "otp": "<otp>",
-  "loginHint": "<loginHint>"
+  "otp": "<otp>"
 }
 ```
 
 | Field | Required | Definition |
 |---|---:|---|
-| `txnId` | Yes | Transaction ID from lookup OTP request. |
-| `otp` | Yes | OTP entered by patient. |
-| `loginHint` | No | Same login hint used for the request. Defaults to `mobile`. |
+| `txnId` | Yes | Transaction ID from the lookup send-OTP call. |
+| `otp` | No* | OTP entered by patient. Required except on the account-selection follow-up call. |
+| `abhaNumber` | No* | Chosen ABHA number. Only needed when the first verify reported multiple accounts. |
 
-Success response: Pass-through ABDM profile/login response. Use the returned token as `<xToken>` when fetching profile, card, or QR. See `ABDM Pass-Through Responses`.
+The backend verifies the OTP with ABDM, transparently exchanges the transfer token for the final X-token when needed, fetches the profile, and returns everything in one response:
+
+```json
+{
+  "txnId": "<txnId>",
+  "xToken": "<xToken>",
+  "profile": { "...": "full ABDM profile/account response" }
+}
+```
+
+If the mobile number has multiple linked ABHA accounts, ABDM requires an account selection. The first verify then returns:
+
+```json
+{
+  "txnId": "<txnId>",
+  "accountSelectionRequired": true,
+  "accounts": [ { "ABHANumber": "<abhaNumber>", "...": "..." } ],
+  "message": "Multiple ABHA accounts are linked to this mobile. Call this endpoint again with txnId and the chosen abhaNumber (no otp needed)."
+}
+```
+
+Call the same endpoint again with `{ "txnId": "<txnId>", "abhaNumber": "<abhaNumber>" }` (no `otp`) to receive the profile response above. The returned `xToken` works as-is with the profile, card, and QR endpoints below.
 
 ### 9. Search ABHA by Mobile
 

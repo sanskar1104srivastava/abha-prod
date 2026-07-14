@@ -18,6 +18,12 @@ from modules.callbackRouter.responses import CallbackAckResponse
 
 
 class CallbackRouterApiService:
+    CONSENT_FETCH_INITIAL_DELAY_SECONDS = 10
+    CONSENT_FETCH_STEP_DELAY_SECONDS = 1
+    CONSENT_FETCH_MAX_DELAY_SECONDS = 900
+    CONSENT_FETCH_MAX_RETRIES = 2
+    CONSENT_FETCH_RETRY_DELAYS_SECONDS = (30, 120)
+
     def __init__(
         self,
         dbService: CallbackRouterDbService | None = None,
@@ -62,7 +68,7 @@ class CallbackRouterApiService:
             self.logger.logProcess("unmatchedCallback", callbackId=callbackId, path=path, correlationIds=correlationIds)
             status = CallbackMatchStatus.UNMATCHED.value
             trackingId = None
-        ackRequestId = str(correlationIds.get("requestId") or callbackId)
+        ackRequestId = self.resolveCallbackRequestId(headers, payload, correlationIds, callbackId)
         self.logger.logProcess(
             "callbackAck",
             callbackId=callbackId,
@@ -93,9 +99,9 @@ class CallbackRouterApiService:
 
         callbackItem = self.dbService.storeRawCallback(path, headers, payload, correlationIds, matchedRequest)
         callbackId = str(callbackItem["callbackId"])
-        consentAckStatus = await self.ackHipConsentNotifyIfNeeded(path, payload, correlationIds, callbackId)
+        consentAckStatus = await self.ackHipConsentNotifyIfNeeded(path, headers, payload, correlationIds, callbackId)
         if consentAckStatus == "not-applicable":
-            consentAckStatus = await self.ackHiuConsentNotifyIfNeeded(path, payload, correlationIds, callbackId)
+            consentAckStatus = await self.ackHiuConsentNotifyIfNeeded(path, headers, payload, correlationIds, callbackId)
         if matchedRequest:
             self.handleMatchedCallback(path, payload, correlationIds, matchedRequest, callbackId, consentAckStatus)
             status = CallbackMatchStatus.MATCHED.value
@@ -104,7 +110,7 @@ class CallbackRouterApiService:
             self.logger.logProcess("unmatchedCallback", callbackId=callbackId, path=path, correlationIds=correlationIds, consentAckStatus=consentAckStatus)
             status = CallbackMatchStatus.UNMATCHED.value
             trackingId = None
-        ackRequestId = str(correlationIds.get("requestId") or callbackId)
+        ackRequestId = self.resolveCallbackRequestId(headers, payload, correlationIds, callbackId)
         self.logger.logProcess(
             "callbackAck",
             callbackId=callbackId,
@@ -121,6 +127,7 @@ class CallbackRouterApiService:
     async def ackHipConsentNotifyIfNeeded(
         self,
         path: str,
+        headers: dict[str, Any],
         payload: dict[str, Any],
         correlationIds: dict[str, str],
         callbackId: str,
@@ -129,9 +136,10 @@ class CallbackRouterApiService:
             return "not-applicable"
         notification = payload.get("notification") if isinstance(payload.get("notification"), dict) else {}
         consentId = str(notification.get("consentId") or correlationIds.get("consentId") or "").strip()
-        requestId = str(payload.get("requestId") or correlationIds.get("requestId") or callbackId).strip()
+        requestId = self.resolveCallbackRequestId(headers, payload, correlationIds, callbackId)
         if not consentId:
             return "skipped:missing-consent-id"
+        ackRequestId = AbdmCryptoService.newRequestId()
         ackPayload = {
             "acknowledgement": {
                 "status": "OK",
@@ -140,15 +148,21 @@ class CallbackRouterApiService:
             "response": {"requestId": requestId},
         }
         try:
-            await self.abdmClient.hipPost("consentHipOnNotify", ackPayload, hipId=correlationIds.get("hipId") or "")
+            await self.abdmClient.hipPost(
+                "consentHipOnNotify",
+                ackPayload,
+                extraHeaders={"REQUEST-ID": ackRequestId},
+                hipId=correlationIds.get("hipId") or "",
+            )
             return "sent"
         except Exception as exc:
-            self.logger.logError("consentOnNotifyAckFailed", exc, callbackId=callbackId, consentId=consentId, requestId=requestId)
+            self.logger.logError("consentOnNotifyAckFailed", exc, callbackId=callbackId, consentId=consentId, requestId=requestId, ackRequestId=ackRequestId, upstream=getattr(exc, "details", None))
             return f"failed:{str(exc)[:300]}"
 
     async def ackHiuConsentNotifyIfNeeded(
         self,
         path: str,
+        headers: dict[str, Any],
         payload: dict[str, Any],
         correlationIds: dict[str, str],
         callbackId: str,
@@ -161,17 +175,38 @@ class CallbackRouterApiService:
         artefactIds = self.correlationService.extractConsentArtefactIds(payload)
         if not artefactIds:
             return "skipped:no-consent-artefacts"
-        requestId = str(payload.get("requestId") or correlationIds.get("requestId") or callbackId).strip()
+        requestId = self.resolveCallbackRequestId(headers, payload, correlationIds, callbackId)
+        ackRequestId = AbdmCryptoService.newRequestId()
         ackPayload = {
             "acknowledgement": [{"status": "OK", "consentId": artefactId} for artefactId in artefactIds],
             "response": {"requestId": requestId},
         }
         try:
-            await self.abdmClient.hiuPost("consentHiuOnNotify", ackPayload, hiuId=correlationIds.get("hiuId") or "")
+            await self.abdmClient.hiuPost(
+                "consentHiuOnNotify",
+                ackPayload,
+                extraHeaders={"REQUEST-ID": ackRequestId},
+                hiuId=correlationIds.get("hiuId") or "",
+            )
             return f"sent:{len(artefactIds)}"
         except Exception as exc:
-            self.logger.logError("consentHiuOnNotifyAckFailed", exc, callbackId=callbackId, artefactCount=len(artefactIds), requestId=requestId)
+            self.logger.logError("consentHiuOnNotifyAckFailed", exc, callbackId=callbackId, artefactCount=len(artefactIds), requestId=requestId, ackRequestId=ackRequestId, upstream=getattr(exc, "details", None))
             return f"failed:{str(exc)[:300]}"
+
+    @staticmethod
+    def resolveCallbackRequestId(
+        headers: dict[str, Any],
+        payload: dict[str, Any],
+        correlationIds: dict[str, str],
+        callbackId: str,
+    ) -> str:
+        loweredHeaders = {str(key).lower().replace("_", "-"): str(value) for key, value in headers.items()}
+        return str(
+            payload.get("requestId")
+            or loweredHeaders.get("request-id")
+            or correlationIds.get("requestId")
+            or callbackId
+        ).strip()
 
     def storeConsentArtefactCorrelations(self, hospitalId: str, payload: dict[str, Any]) -> None:
         """Map every consent artefact ID to the hospital so later callbacks
@@ -211,20 +246,49 @@ class CallbackRouterApiService:
         hospitalId = str(matchedRequest["hospitalId"])
         trackingId = str(matchedRequest["trackingId"])
         eventType = self.inferEventType(path, payload)
-        self.requestLogService.updateStatus(
-            hospitalId,
-            trackingId,
-            self.inferStatus(payload),
-            eventType,
-            {"callbackId": callbackId, "path": path, "correlationIds": correlationIds, **({"consentAckStatus": consentAckStatus} if consentAckStatus else {})},
-        )
+        consentFetchRetryStatus = self.retryConsentFetchIfTransientArtefactError(hospitalId, trackingId, path, payload, callbackId)
+        if consentFetchRetryStatus == "queued":
+            self.logger.logProcess(
+                "parentStatusUpdateSkipped",
+                callbackId=callbackId,
+                trackingId=trackingId,
+                reason="consent-fetch-retry-queued",
+            )
+        else:
+            self.requestLogService.updateStatus(
+                hospitalId,
+                trackingId,
+                self.inferStatus(payload),
+                eventType,
+                {"callbackId": callbackId, "path": path, "correlationIds": correlationIds, **({"consentAckStatus": consentAckStatus} if consentAckStatus else {})},
+            )
         try:
             self.requestLogService.backfillCorrelation(hospitalId, trackingId, correlationIds)
+            correlationUpdates = {
+                key: value
+                for key, value in correlationIds.items()
+                if key in {"consentRequestId", "transactionId", "consentId"} and value
+            }
+            if correlationUpdates:
+                matchedRequest = {**matchedRequest, **correlationUpdates}
         except Exception as exc:
             self.logger.logError("backfillCorrelationFailed", exc, hospitalId=hospitalId, trackingId=trackingId)
-        self.enqueueWebhookEvent(hospitalId, trackingId, eventType, path, correlationIds, payload, callbackId, matchedRequest)
+        if consentFetchRetryStatus == "queued":
+            self.logger.logProcess(
+                "webhookEventSkipped",
+                callbackId=callbackId,
+                trackingId=trackingId,
+                reason="transient-consent-fetch-error",
+            )
+        else:
+            self.enqueueWebhookEvent(hospitalId, trackingId, eventType, path, correlationIds, payload, callbackId, matchedRequest)
         if eventType == EventType.CONSENT_GRANTED.value:
-            self.enqueueHealthInformationRequestsForConsentArtefacts(
+            self.indexConsentArtefactsForRequest(hospitalId, trackingId, correlationIds, payload)
+            self.enqueueConsentFetchRequestsForConsentArtefacts(
+                hospitalId, trackingId, path, correlationIds, payload, matchedRequest, callbackId
+            )
+        if self.shouldCreateHealthInformationRequestFromConsentFetch(path, payload):
+            self.enqueueHealthInformationRequestForFetchedConsent(
                 hospitalId, trackingId, path, correlationIds, payload, matchedRequest, callbackId
             )
         if self.shouldCreateDataFlowJob(path):
@@ -281,7 +345,19 @@ class CallbackRouterApiService:
             },
         )
 
-    def enqueueHealthInformationRequestsForConsentArtefacts(
+    def indexConsentArtefactsForRequest(
+        self,
+        hospitalId: str,
+        trackingId: str,
+        correlationIds: dict[str, str],
+        payload: dict[str, Any],
+    ) -> None:
+        artefactIds = self.correlationService.extractConsentArtefactIds(payload)
+        consentRequestId = str(correlationIds.get("consentRequestId") or "").strip()
+        for artefactId in artefactIds:
+            self.requestLogService.recordConsentArtefactIndex(hospitalId, trackingId, consentRequestId, artefactId)
+
+    def enqueueConsentFetchRequestsForConsentArtefacts(
         self,
         hospitalId: str,
         trackingId: str,
@@ -293,37 +369,25 @@ class CallbackRouterApiService:
     ) -> None:
         artefactIds = self.correlationService.extractConsentArtefactIds(payload)
         if not artefactIds:
-            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="no-consent-artefacts")
+            self.logger.logProcess("consentFetchFanoutSkipped", callbackId=callbackId, reason="no-consent-artefacts")
             return
         if not self.settings.dataFlowJobsQueueUrl:
-            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="data-flow-queue-missing")
+            self.logger.logProcess("consentFetchFanoutSkipped", callbackId=callbackId, reason="data-flow-queue-missing")
             return
         requestPayload = matchedRequest.get("requestPayload") if isinstance(matchedRequest.get("requestPayload"), dict) else {}
-        dateRange = requestPayload.get("dateRange") if isinstance(requestPayload.get("dateRange"), dict) else {}
-        if not dateRange:
-            permission = requestPayload.get("permission") if isinstance(requestPayload.get("permission"), dict) else {}
-            dateRange = permission.get("dateRange") if isinstance(permission.get("dateRange"), dict) else {}
-        if not dateRange:
-            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="missing-date-range")
-            return
         hiuId = str(correlationIds.get("hiuId") or requestPayload.get("hiuId") or matchedRequest.get("hiuId") or "").strip()
         if not hiuId:
-            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="missing-hiu-id")
+            self.logger.logProcess("consentFetchFanoutSkipped", callbackId=callbackId, reason="missing-hiu-id")
             return
-        hiTypes = requestPayload.get("hiTypes") if isinstance(requestPayload.get("hiTypes"), list) else []
-        patientContext = {
-            "abhaAddress": str(requestPayload.get("abhaAddress") or ""),
-            "patientReference": str(requestPayload.get("patientReference") or ""),
-            "consentRequestId": str(matchedRequest.get("consentRequestId") or correlationIds.get("consentRequestId") or ""),
-            "consentTrackingId": trackingId,
-            "hiTypes": hiTypes,
-        }
-        for artefactId in artefactIds:
+        maxDelaySeconds = 0
+        for index, artefactId in enumerate(artefactIds):
+            delaySeconds = self.consentFetchDelaySeconds(index)
+            maxDelaySeconds = max(maxDelaySeconds, delaySeconds)
             self.awsService.sendQueueMessage(
                 self.settings.dataFlowJobsQueueUrl,
                 {
                     "jobId": AbdmCryptoService.newEventId(),
-                    "jobType": CallbackJobType.HIU_HEALTH_INFORMATION_REQUEST.value,
+                    "jobType": CallbackJobType.HIU_CONSENT_FETCH.value,
                     "hospitalId": hospitalId,
                     "trackingId": trackingId,
                     "callbackId": callbackId,
@@ -336,16 +400,201 @@ class CallbackRouterApiService:
                     "payload": {
                         "consentId": artefactId,
                         "hiuId": hiuId,
-                        "dateRange": dateRange,
-                        **patientContext,
+                        "consentRequestId": str(matchedRequest.get("consentRequestId") or correlationIds.get("consentRequestId") or ""),
+                        "consentTrackingId": trackingId,
+                        "consentFetchAttempt": 0,
+                        "consentFetchIndex": index,
                     },
                 },
+                delaySeconds=delaySeconds,
             )
-        self.logger.logProcess("healthInformationFanoutQueued", callbackId=callbackId, artefactCount=len(artefactIds))
+        self.logger.logProcess(
+            "consentFetchFanoutQueued",
+            callbackId=callbackId,
+            artefactCount=len(artefactIds),
+            maxDelaySeconds=maxDelaySeconds,
+        )
+
+    def retryConsentFetchIfTransientArtefactError(
+        self,
+        hospitalId: str,
+        trackingId: str,
+        path: str,
+        payload: dict[str, Any],
+        callbackId: str,
+    ) -> str:
+        if not self.isTransientConsentFetchArtefactError(path, payload):
+            return "not-applicable"
+        if not self.settings.dataFlowJobsQueueUrl:
+            self.logger.logProcess("consentFetchRetrySkipped", callbackId=callbackId, reason="data-flow-queue-missing")
+            return "skipped"
+        response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
+        requestId = str(response.get("requestId") or payload.get("requestId") or "").strip()
+        if not requestId:
+            self.logger.logProcess("consentFetchRetrySkipped", callbackId=callbackId, reason="missing-response-request-id")
+            return "skipped"
+        fetchRow = self.requestLogService.findConsentFetchByRequestId(requestId)
+        if not fetchRow:
+            self.logger.logProcess("consentFetchRetrySkipped", callbackId=callbackId, reason="fetch-row-not-found", requestId=requestId)
+            return "skipped"
+        requestPayload = fetchRow.get("requestPayload") if isinstance(fetchRow.get("requestPayload"), dict) else {}
+        attempt = self.safeInt(requestPayload.get("consentFetchAttempt"), 0)
+        if attempt >= self.CONSENT_FETCH_MAX_RETRIES:
+            self.logger.logProcess(
+                "consentFetchRetryExhausted",
+                callbackId=callbackId,
+                requestId=requestId,
+                attempt=attempt,
+            )
+            return "exhausted"
+        consentId = str(fetchRow.get("consentId") or requestPayload.get("consentId") or "").strip()
+        hiuId = str(requestPayload.get("hiuId") or fetchRow.get("hiuId") or "").strip()
+        if not consentId or not hiuId:
+            self.logger.logProcess("consentFetchRetrySkipped", callbackId=callbackId, reason="missing-consent-or-hiu-id")
+            return "skipped"
+        nextAttempt = attempt + 1
+        delaySeconds = self.consentFetchRetryDelaySeconds(nextAttempt)
+        fetchTrackingId = str(fetchRow.get("trackingId") or trackingId)
+        fetchHospitalId = str(fetchRow.get("hospitalId") or hospitalId)
+        consentRequestId = str(fetchRow.get("consentRequestId") or requestPayload.get("consentRequestId") or "")
+        self.awsService.sendQueueMessage(
+            self.settings.dataFlowJobsQueueUrl,
+            {
+                "jobId": AbdmCryptoService.newEventId(),
+                "jobType": CallbackJobType.HIU_CONSENT_FETCH.value,
+                "hospitalId": fetchHospitalId,
+                "trackingId": fetchTrackingId,
+                "callbackId": callbackId,
+                "callbackPath": path,
+                "correlationIds": {
+                    "requestId": requestId,
+                    "consentId": consentId,
+                    "consentRequestId": consentRequestId,
+                    "hiuId": hiuId,
+                },
+                "payload": {
+                    **requestPayload,
+                    "consentId": consentId,
+                    "hiuId": hiuId,
+                    "consentRequestId": consentRequestId,
+                    "consentTrackingId": str(requestPayload.get("consentTrackingId") or fetchTrackingId),
+                    "consentFetchAttempt": nextAttempt,
+                    "consentFetchRetryForRequestId": requestId,
+                },
+            },
+            delaySeconds=delaySeconds,
+        )
+        self.logger.logProcess(
+            "consentFetchRetryQueued",
+            callbackId=callbackId,
+            consentId=consentId,
+            attempt=nextAttempt,
+            delaySeconds=delaySeconds,
+        )
+        return "queued"
+
+    def enqueueHealthInformationRequestForFetchedConsent(
+        self,
+        hospitalId: str,
+        trackingId: str,
+        path: str,
+        correlationIds: dict[str, str],
+        payload: dict[str, Any],
+        matchedRequest: dict[str, Any],
+        callbackId: str,
+    ) -> None:
+        if not self.settings.dataFlowJobsQueueUrl:
+            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="data-flow-queue-missing")
+            return
+        consent = payload.get("consent") if isinstance(payload.get("consent"), dict) else {}
+        if str(consent.get("status") or "").strip().upper() != "GRANTED":
+            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="consent-not-granted")
+            return
+        detail = consent.get("consentDetail") if isinstance(consent.get("consentDetail"), dict) else {}
+        consentId = str(detail.get("consentId") or correlationIds.get("consentId") or "").strip()
+        requestPayload = matchedRequest.get("requestPayload") if isinstance(matchedRequest.get("requestPayload"), dict) else {}
+        hiu = detail.get("hiu") if isinstance(detail.get("hiu"), dict) else {}
+        hiuId = str(hiu.get("id") or correlationIds.get("hiuId") or requestPayload.get("hiuId") or matchedRequest.get("hiuId") or "").strip()
+        permission = detail.get("permission") if isinstance(detail.get("permission"), dict) else {}
+        dateRange = permission.get("dateRange") if isinstance(permission.get("dateRange"), dict) else {}
+        if not dateRange:
+            dateRange = requestPayload.get("dateRange") if isinstance(requestPayload.get("dateRange"), dict) else {}
+        if not dateRange:
+            originalPermission = requestPayload.get("permission") if isinstance(requestPayload.get("permission"), dict) else {}
+            dateRange = originalPermission.get("dateRange") if isinstance(originalPermission.get("dateRange"), dict) else {}
+        if not consentId or not hiuId or not dateRange:
+            self.logger.logProcess("healthInformationFanoutSkipped", callbackId=callbackId, reason="missing-consent-hiu-or-date-range")
+            return
+        patient = detail.get("patient") if isinstance(detail.get("patient"), dict) else {}
+        hiTypes = detail.get("hiTypes") if isinstance(detail.get("hiTypes"), list) else []
+        if not hiTypes:
+            hiTypes = requestPayload.get("hiTypes") if isinstance(requestPayload.get("hiTypes"), list) else []
+        self.awsService.sendQueueMessage(
+            self.settings.dataFlowJobsQueueUrl,
+            {
+                "jobId": AbdmCryptoService.newEventId(),
+                "jobType": CallbackJobType.HIU_HEALTH_INFORMATION_REQUEST.value,
+                "hospitalId": hospitalId,
+                "trackingId": trackingId,
+                "callbackId": callbackId,
+                "callbackPath": path,
+                "correlationIds": {
+                    **{key: value for key, value in correlationIds.items() if value},
+                    "consentId": consentId,
+                    "hiuId": hiuId,
+                },
+                "payload": {
+                    "consentId": consentId,
+                    "hiuId": hiuId,
+                    "dateRange": dateRange,
+                    "abhaAddress": str(requestPayload.get("abhaAddress") or patient.get("id") or ""),
+                    "patientReference": str(requestPayload.get("patientReference") or ""),
+                    "consentRequestId": str(matchedRequest.get("consentRequestId") or correlationIds.get("consentRequestId") or ""),
+                    "consentTrackingId": trackingId,
+                    "hiTypes": hiTypes,
+                },
+            },
+        )
+        self.logger.logProcess("healthInformationFanoutQueued", callbackId=callbackId, consentId=consentId)
 
     @staticmethod
     def shouldCreateDataFlowJob(path: str) -> bool:
         return "health-information/request" in path.lower()
+
+    @staticmethod
+    def shouldCreateHealthInformationRequestFromConsentFetch(path: str, payload: dict[str, Any]) -> bool:
+        return "consent" in path.lower() and "on-fetch" in path.lower() and isinstance(payload.get("consent"), dict)
+
+    @classmethod
+    def consentFetchDelaySeconds(cls, index: int) -> int:
+        delay = cls.CONSENT_FETCH_INITIAL_DELAY_SECONDS + max(int(index or 0), 0) * cls.CONSENT_FETCH_STEP_DELAY_SECONDS
+        return min(max(delay, 0), cls.CONSENT_FETCH_MAX_DELAY_SECONDS)
+
+    @classmethod
+    def consentFetchRetryDelaySeconds(cls, attempt: int) -> int:
+        if attempt <= 0:
+            return cls.CONSENT_FETCH_RETRY_DELAYS_SECONDS[0]
+        index = min(attempt - 1, len(cls.CONSENT_FETCH_RETRY_DELAYS_SECONDS) - 1)
+        return min(max(cls.CONSENT_FETCH_RETRY_DELAYS_SECONDS[index], 0), cls.CONSENT_FETCH_MAX_DELAY_SECONDS)
+
+    @staticmethod
+    def isTransientConsentFetchArtefactError(path: str, payload: dict[str, Any]) -> bool:
+        loweredPath = path.lower()
+        if "consent" not in loweredPath or "on-fetch" not in loweredPath:
+            return False
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+        if not error:
+            return False
+        code = str(error.get("code") or error.get("errorCode") or "").strip().upper()
+        message = str(error.get("message") or error.get("errorMessage") or "").strip().lower()
+        return "ABDM-1080" in code or "invalid consent artefact" in message or "invalid consent artifact" in message
+
+    @staticmethod
+    def safeInt(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     @staticmethod
     def inferEventType(path: str, payload: dict[str, Any]) -> str:
@@ -370,6 +619,10 @@ class CallbackRouterApiService:
         notificationStatus = str(notification.get("status") or "").strip().lower()
         if notificationStatus:
             return notificationStatus
+        consent = payload.get("consent") if isinstance(payload.get("consent"), dict) else {}
+        consentStatus = str(consent.get("status") or "").strip().lower()
+        if consentStatus:
+            return consentStatus
         response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
         acknowledgement = response.get("acknowledgement") if isinstance(response.get("acknowledgement"), dict) else {}
         status = str(acknowledgement.get("status") or "").strip().lower()

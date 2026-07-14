@@ -7,7 +7,10 @@
       "Read(//d/Abha-Integration/backend/**)",
       "Bash(grep -n \"def ecdh_decrypt\\\\|def ecdh_encrypt\\\\|def _derive\" -A 40 /d/Abha-Integration/backend/abdm_client.py | head -120)",
       "Bash(sed -n '459,500p' /d/Abha-Integration/backend/abdm_client.py)",
-      "Bash(grep -n \"def iso_timestamp\" -A 4 /d/Abha-Integration/backend/abdm_client.py)"
+      "Bash(grep -n \"def iso_timestamp\" -A 4 /d/Abha-Integration/backend/abdm_client.py)",
+      "Bash(AWS_PROFILE=algoflow aws dynamodb scan --region ap-south-1 --table-name sahaiRequestLog --filter-expression 'recordType = :rt AND receivedAt > :d' --expression-attribute-values '{\":rt\":{\"S\":\"callback\"},\":d\":{\"S\":\"2026-07-13T11:05\"}}' --projection-expression pk,receivedAt,eventPath,requestId,bodyS3Key --output json)",
+      "Bash(python -c ' *)",
+      "PowerShell($env:AWS_PROFILE='algoflow'; $env:AWS_REGION='ap-south-1'; $s = aws secretsmanager get-secret-value --secret-id sahai/production-backend/dev --query SecretString --output text | ConvertFrom-Json; $s.PSObject.Properties | Where-Object { $_.Name -match 'abdm|cm|hip|gateway' } | ForEach-Object { $v = \"$\\($_.Value\\)\"; if \\($_.Name -match 'secret|token|key' -and $v.Length -gt 8\\) { $v = $v.Substring\\(0,4\\) + '...' + $v.Length + 'chars' }; \"$\\($_.Name\\) = $v\" })"
     ]
   }
 }

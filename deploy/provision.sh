@@ -156,6 +156,7 @@ ensure_dynamo_table "abdmCorrelation" \
 ensure_table_ttl "sahaiRequestLog"
 ensure_table_ttl "sahaiHealthRecords"
 ensure_table_ttl "abdmCorrelation"
+ensure_table_ttl "sahaiStatusStore"
 
 echo ""
 echo "[SQS queues]"

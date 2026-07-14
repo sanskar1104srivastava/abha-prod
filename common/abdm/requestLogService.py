@@ -76,8 +76,6 @@ class RequestLogService:
             ("transactionId", IndexName.TRANSACTION_ID_INDEX.value, correlationIds.get("transactionId", "")),
             ("consentRequestId", IndexName.CONSENT_REQUEST_ID_INDEX.value, correlationIds.get("consentRequestId", "")),
             ("consentId", IndexName.CONSENT_ID_INDEX.value, correlationIds.get("consentId", "")),
-            ("hipId", IndexName.HIP_ID_INDEX.value, correlationIds.get("hipId", "")),
-            ("hiuId", IndexName.HIU_ID_INDEX.value, correlationIds.get("hiuId", "")),
         ]
         for keyName, indexName, keyValue in lookups:
             if not keyValue:
@@ -122,12 +120,84 @@ class RequestLogService:
         }
         self.dbService.putItem(TableName.REQUEST_LOG.value, item)
 
+    def recordConsentArtefactIndex(self, hospitalId: str, trackingId: str, consentRequestId: str, consentId: str) -> None:
+        if not hospitalId or not trackingId or not consentId:
+            return
+        now = DateTimeUtils.utcnowIso()
+        item = {
+            "pk": f"HOSP#{hospitalId}",
+            "sk": f"ARTEFACT#{trackingId}#{consentId}",
+            "recordType": "consentArtefact",
+            "hospitalId": hospitalId,
+            "trackingId": trackingId,
+            "consentId": consentId,
+            "consentRequestId": consentRequestId,
+            "createdAt": now,
+            "updatedAt": now,
+            "expiresAt": DateTimeUtils.epochSeconds() + self.settings.requestTtlDays * 86400,
+        }
+        self.dbService.putItem(TableName.REQUEST_LOG.value, item)
+
+    def recordConsentFetchRequest(
+        self,
+        hospitalId: str,
+        trackingId: str,
+        requestId: str,
+        consentRequestId: str,
+        consentId: str,
+        requestPayload: dict[str, Any],
+    ) -> None:
+        if not hospitalId or not trackingId or not requestId or not consentId:
+            return
+        now = DateTimeUtils.utcnowIso()
+        item = {
+            "pk": f"HOSP#{hospitalId}",
+            "sk": f"FETCH#{trackingId}#{consentId}",
+            "recordType": "consentFetch",
+            "flowType": "external.consent.fetch",
+            "hospitalId": hospitalId,
+            "trackingId": trackingId,
+            "requestId": requestId,
+            "consentId": consentId,
+            "consentRequestId": consentRequestId,
+            "status": "accepted",
+            "requestPayload": requestPayload,
+            "createdAt": now,
+            "updatedAt": now,
+            "expiresAt": DateTimeUtils.epochSeconds() + self.settings.requestTtlDays * 86400,
+        }
+        self.dbService.putItem(TableName.REQUEST_LOG.value, item)
+
+    def findConsentFetchByRequestId(self, requestId: str) -> dict[str, Any] | None:
+        requestId = str(requestId or "").strip()
+        if not requestId:
+            return None
+        rows = self.dbService.queryIndex(
+            TableName.REQUEST_LOG.value,
+            IndexName.REQUEST_ID_INDEX.value,
+            "requestId",
+            requestId,
+            limit=20,
+        )
+        for row in rows:
+            if str(row.get("recordType") or "") == "consentFetch":
+                return row
+        return None
+
     def backfillCorrelation(self, hospitalId: str, trackingId: str, newCorrelationIds: dict[str, str]) -> None:
         updateable = {"consentRequestId", "transactionId", "consentId"}
         updates = {k: v for k, v in newCorrelationIds.items() if k in updateable and v}
         if not updates:
             return
-        expressions = [f"{k} = if_not_exists({k}, :{k})" for k in updates]
+        expressions = []
+        for key in updates:
+            if key == "transactionId":
+                expressions.append("transactionId = :transactionId")
+                expressions.append("abdmTransactionId = :transactionId")
+            elif key == "consentRequestId":
+                expressions.append("consentRequestId = :consentRequestId")
+            else:
+                expressions.append(f"{key} = if_not_exists({key}, :{key})")
         self.dbService.updateItem(
             TableName.REQUEST_LOG.value,
             {"pk": f"HOSP#{hospitalId}", "sk": f"REQ#{trackingId}"},

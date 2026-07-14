@@ -55,11 +55,15 @@ class AwsService:
         response = self.secretsManagerClient().get_secret_value(SecretId=secretName)
         return str(response.get("SecretString") or "")
 
-    def sendQueueMessage(self, queueUrl: str, message: dict[str, Any]) -> dict[str, Any]:
-        return self.sqsClient().send_message(
-            QueueUrl=queueUrl,
-            MessageBody=json.dumps(message, default=str, separators=(",", ":")),
-        )
+    def sendQueueMessage(self, queueUrl: str, message: dict[str, Any], delaySeconds: int = 0) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "QueueUrl": queueUrl,
+            "MessageBody": json.dumps(message, default=str, separators=(",", ":")),
+        }
+        delay = min(max(int(delaySeconds or 0), 0), 900)
+        if delay:
+            params["DelaySeconds"] = delay
+        return self.sqsClient().send_message(**params)
 
     def putJsonObject(self, bucket: str, key: str, body: dict[str, Any]) -> None:
         self.s3Client().put_object(

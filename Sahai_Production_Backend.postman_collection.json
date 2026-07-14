@@ -410,65 +410,11 @@
       ]
     },
     {
-      "name": "03 - ABHA Lookup (Direct, No OTP)",
-      "description": "Look up existing ABHA profiles directly — no OTP required.\n\nUse by-mobile or by-abha-number for basic profile info.\nUse PHR Send OTP → PHR Verify OTP to get a phrToken for full profile access.",
+      "name": "03 - ABHA Lookup (Mobile/Aadhaar OTP Login)",
+      "description": "Look up an existing ABHA in two calls: send the patient's mobile OR aadhaar, they receive an OTP, verify it, and the full ABHA profile plus xToken come back in one response.\n\nIf a mobile has multiple linked ABHA accounts, Verify returns the account list instead - call Select Account with txnId + abhaNumber (no otp) to finish.",
       "item": [
         {
-          "name": "Search ABHA by Mobile",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
-              { "key": "Content-Type", "value": "application/json", "type": "text" }
-            ],
-            "url": { "raw": "{{baseUrl}}/v1/abha/search/by-mobile", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "search", "by-mobile"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mobile\": \"9999999999\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "description": "Find all ABHA accounts linked to a mobile number. No OTP required."
-          },
-          "response": []
-        },
-        {
-          "name": "Search ABHA by Number",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
-              { "key": "Content-Type", "value": "application/json", "type": "text" }
-            ],
-            "url": { "raw": "{{baseUrl}}/v1/abha/search/by-abha-number", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "search", "by-abha-number"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"abhaNumber\": \"91234567890123\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "description": "Look up ABHA profile by 14-digit ABHA number. No OTP required."
-          },
-          "response": []
-        },
-        {
-          "name": "PHR Search (by ABHA Address)",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
-              { "key": "Content-Type", "value": "application/json", "type": "text" }
-            ],
-            "url": { "raw": "{{baseUrl}}/v1/abha/phr/search", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "search"] },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\"\n}",
-              "options": { "raw": { "language": "json" } }
-            },
-            "description": "Check whether an ABHA address exists in the PHR system. No OTP required."
-          },
-          "response": []
-        },
-        {
-          "name": "PHR Send OTP",
+          "name": "Lookup - Request OTP (Mobile)",
           "event": [
             {
               "listen": "test",
@@ -486,21 +432,43 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
-              { "key": "Content-Type", "value": "application/json", "type": "text" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
             ],
-            "url": { "raw": "{{baseUrl}}/v1/abha/phr/send-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "send-otp"] },
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/lookup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "lookup"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"txnId\": \"\",\n  \"otpSystem\": \"abdm\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "raw": "{\n  \"mobile\": \"9999999999\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Send OTP for PHR-based patient login (ABHA address flow). txnId auto-saved."
+            "description": "Send OTP to the patient's mobile. Returns txnId (auto-saved)."
           },
           "response": []
         },
         {
-          "name": "PHR Verify OTP",
+          "name": "Lookup - Request OTP (Aadhaar)",
           "event": [
             {
               "listen": "test",
@@ -509,8 +477,7 @@
                 "exec": [
                   "try {",
                   "  var j = pm.response.json();",
-                  "  if (j.phrToken) { pm.collectionVariables.set('phrToken', j.phrToken); console.log('phrToken saved'); }",
-                  "  if (j.txnId)    { pm.collectionVariables.set('txnId',    j.txnId);    console.log('txnId saved'); }",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
                   "} catch(e) {}"
                 ]
               }
@@ -519,16 +486,150 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" },
-              { "key": "Content-Type", "value": "application/json", "type": "text" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
             ],
-            "url": { "raw": "{{baseUrl}}/v1/abha/phr/verify-otp", "host": ["{{baseUrl}}"], "path": ["v1", "abha", "phr", "verify-otp"] },
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/lookup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "lookup"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"aadhaar\": \"123412341234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Send OTP to the patient's Aadhaar-linked mobile. Returns txnId (auto-saved)."
+          },
+          "response": []
+        },
+        {
+          "name": "Lookup - Verify OTP (returns Profile)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "  if (j.xToken) { pm.collectionVariables.set('xToken', j.xToken); console.log('xToken saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/lookup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "lookup",
+                "verify"
+              ]
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"otp\": \"123456\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "description": "Verify PHR OTP. Returns phrToken — auto-saved. Use phrToken as xToken for profile/card/qr endpoints."
+            "description": "Verify the OTP. Returns { txnId, xToken, profile } - the full ABHA profile in one shot. xToken is auto-saved for the profile/card/QR requests. If the mobile has multiple linked accounts the response instead carries accountSelectionRequired + accounts; use 'Lookup - Select Account' next."
+          },
+          "response": []
+        },
+        {
+          "name": "Lookup - Select Account (only if multiple)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "  if (j.xToken) { pm.collectionVariables.set('xToken', j.xToken); console.log('xToken saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/lookup/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "lookup",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"abhaNumber\": \"91234567890123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Only needed when Verify reported multiple accounts: same endpoint, txnId + chosen abhaNumber, no otp. Returns { txnId, xToken, profile }."
           },
           "response": []
         }
@@ -536,7 +637,7 @@
     },
     {
       "name": "04 - ABHA Profile",
-      "description": "Fetch full profile, health card PDF, or QR code. Requires xToken from enrollment (enroll/aadhaar/verify-otp) or phrToken from PHR Verify OTP.",
+      "description": "Fetch full profile, health card PDF, or QR code. Requires xToken from Lookup Verify (folder 03), enrollment (enroll/aadhaar/verify-otp), or phrToken from PHR Verify OTP.",
       "item": [
         {
           "name": "Get ABHA Profile Details",
@@ -1082,6 +1183,246 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{apiKey}}", "type": "text" }],
             "url": { "raw": "{{baseUrl}}/v1/webhook-endpoint/test", "host": ["{{baseUrl}}"], "path": ["v1", "webhook-endpoint", "test"] },
             "description": "Sahai forwards raw ABDM callback bodies to your webhookUrl with no envelope or transformation.\n\nHeaders on every request:\n  X-Abdm-Path: <abdm-callback-path>   (e.g. /v0.5/hip/link/on-add-contexts)\n  X-Abdm-Signature: HMAC-SHA256(webhookSecret, rawBody)\n  Content-Type: application/json\n\nVerify: HMAC-SHA256(webhookSecret, rawBody) == X-Abdm-Signature\n\n--- Link Token (HIP-initiated linking) ---\nX-Abdm-Path: /v0.5/users/auth/on-fetch-modes  (auth mode fetch)\nX-Abdm-Path: /v0.5/users/auth/on-init          (OTP sent)\nX-Abdm-Path: /v0.5/users/auth/on-confirm       (linkToken delivered)\nbody.auth.accessToken → this is the linkToken, paste as {{linkToken}}\n\n--- User-initiated linking ---\nX-Abdm-Path: /v0.5/hip/link/carecontext/on-discover\nX-Abdm-Path: /v0.5/hip/link/on-init\nX-Abdm-Path: /v0.5/hip/link/on-confirm         (linkToken in body.acknowledgement)\n\n--- Consent ---\nX-Abdm-Path: /v0.5/consent/hiu/notify\nbody.notification.status = GRANTED | DENIED | REVOKED | EXPIRED\nbody.notification.consentArtefacts[0].id → paste as {{consentId}}\n\n--- Health Information (HIP-side) ---\nX-Abdm-Path: /v0.5/health-information/hip/request\nbody.hiRequest.dataPushUrl → where you must push encrypted FHIR data\nbody.hiRequest.keyMaterial  → HIU public key to encrypt data with\nbody.hiRequest.consent.id   → consentId\nbody.transactionId          → use in your on-request acknowledgement\n\n--- Scan & Share ---\nX-Abdm-Path: /v0.5/hip/patient/share/profile\nbody.profile → patient demographics shared from ABDM app"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 - Optional: Direct Search & PHR Login",
+      "description": "Auxiliary lookups for special cases. Direct searches return basic/masked info without OTP (no xToken, so no profile/card/QR access). The PHR flow logs in by ABHA address instead of mobile/aadhaar. For the standard lookup flow use folder 03.",
+      "item": [
+        {
+          "name": "Search ABHA by Mobile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/search/by-mobile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "search",
+                "by-mobile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"9999999999\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Find all ABHA accounts linked to a mobile number. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "Search ABHA by Number",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/search/by-abha-number",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "search",
+                "by-abha-number"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaNumber\": \"91234567890123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Look up ABHA profile by 14-digit ABHA number. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Search (by ABHA Address)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/phr/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "phr",
+                "search"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Check whether an ABHA address exists in the PHR system. No OTP required."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Send OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.txnId) { pm.collectionVariables.set('txnId', j.txnId); console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/phr/send-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "phr",
+                "send-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"abhaAddress\": \"{{abhaAddress}}\",\n  \"txnId\": \"\",\n  \"otpSystem\": \"abdm\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Send OTP for PHR-based patient login (ABHA address flow). txnId auto-saved."
+          },
+          "response": []
+        },
+        {
+          "name": "PHR Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "try {",
+                  "  var j = pm.response.json();",
+                  "  if (j.phrToken) { pm.collectionVariables.set('phrToken', j.phrToken); console.log('phrToken saved'); }",
+                  "  if (j.txnId)    { pm.collectionVariables.set('txnId',    j.txnId);    console.log('txnId saved'); }",
+                  "} catch(e) {}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{apiKey}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/abha/phr/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "abha",
+                "phr",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txnId\": \"{{txnId}}\",\n  \"otp\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Verify PHR OTP. Returns phrToken — auto-saved. Use phrToken as xToken for profile/card/qr endpoints."
           },
           "response": []
         }

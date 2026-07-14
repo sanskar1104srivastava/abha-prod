@@ -139,6 +139,8 @@ class DataFlowApiService:
             return await self.processHipHealthInformationRequest(requestBody)
         if requestBody.jobType == DataFlowJobType.HIU_HEALTH_INFORMATION_REQUEST.value:
             return await self.processHiuHealthInformationRequest(requestBody)
+        if requestBody.jobType == DataFlowJobType.HIU_CONSENT_FETCH.value:
+            return await self.processHiuConsentFetch(requestBody)
         response = DataJobResponse(
             jobId=requestBody.jobId,
             trackingId=requestBody.trackingId,
@@ -146,6 +148,64 @@ class DataFlowApiService:
             errors=[{"code": ErrorCode.INVALID_REQUEST.value, "message": "Unsupported data-flow job type"}],
         )
         return response.model_dump(mode="json")
+
+    async def processHiuConsentFetch(self, requestBody: DataFlowJobRequest) -> dict[str, Any]:
+        payload = requestBody.payload if isinstance(requestBody.payload, dict) else {}
+        consentId = str(payload.get("consentId") or requestBody.correlationIds.get("consentId") or "").strip()
+        hiuId = str(payload.get("hiuId") or requestBody.correlationIds.get("hiuId") or "").strip()
+        if not consentId or not hiuId:
+            result = DataJobResponse(
+                jobId=requestBody.jobId,
+                trackingId=requestBody.trackingId,
+                status=DataFlowStatus.FAILED.value,
+                errors=[{"code": ErrorCode.INVALID_REQUEST.value, "message": "Missing consentId or hiuId"}],
+            ).model_dump(mode="json")
+            self.dbService.storeJobResult(requestBody.hospitalId, requestBody.trackingId, requestBody.jobId, result)
+            return result
+        try:
+            requestId = AbdmCryptoService.newRequestId()
+            fetchPayload = {
+                "requestId": requestId,
+                "timestamp": DateTimeUtils.utcnowIso(),
+                "consentId": consentId,
+            }
+            self.requestLogService.recordConsentFetchRequest(
+                requestBody.hospitalId,
+                requestBody.trackingId,
+                requestId,
+                str(payload.get("consentRequestId") or requestBody.correlationIds.get("consentRequestId") or ""),
+                consentId,
+                {
+                    **payload,
+                    "requestId": requestId,
+                    "consentId": consentId,
+                    "hiuId": hiuId,
+                    "consentTrackingId": str(payload.get("consentTrackingId") or requestBody.trackingId or ""),
+                },
+            )
+            fetchResponse = await self.abdmClient.hiuPost(
+                "consentFetch",
+                fetchPayload,
+                extraHeaders={"REQUEST-ID": requestId},
+                hiuId=hiuId,
+            )
+            result = DataJobResponse(
+                jobId=requestBody.jobId,
+                trackingId=requestBody.trackingId,
+                status=DataFlowStatus.ACCEPTED.value,
+            ).model_dump(mode="json")
+            result["consentFetch"] = fetchResponse
+            self.dbService.storeJobResult(requestBody.hospitalId, requestBody.trackingId, requestBody.jobId, result)
+            return result
+        except Exception as exc:
+            result = DataJobResponse(
+                jobId=requestBody.jobId,
+                trackingId=requestBody.trackingId,
+                status=DataFlowStatus.FAILED.value,
+                errors=[{"code": ErrorCode.UPSTREAM_ERROR.value, "message": str(exc)[:500]}],
+            ).model_dump(mode="json")
+            self.dbService.storeJobResult(requestBody.hospitalId, requestBody.trackingId, requestBody.jobId, result)
+            return result
 
     async def processHiuHealthInformationRequest(self, requestBody: DataFlowJobRequest) -> dict[str, Any]:
         payload = requestBody.payload if isinstance(requestBody.payload, dict) else {}
@@ -162,7 +222,7 @@ class DataFlowApiService:
             ).model_dump(mode="json")
             self.dbService.storeJobResult(requestBody.hospitalId, requestBody.trackingId, requestBody.jobId, result)
             return result
-        idempotencyKey = f"auto-hi-{requestBody.trackingId}-{consentId}"
+        idempotencyKey = f"auto-hi-fetch-{requestBody.trackingId}-{consentId}"
         try:
             healthInfoResponse = await self.externalApiService.requestHealthInformation(
                 requestBody.hospitalId,

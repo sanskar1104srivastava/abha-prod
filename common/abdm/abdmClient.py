@@ -192,7 +192,7 @@ class AbdmClient:
         # Strip PEM headers/footers and whitespace → plain base64-DER expected by rsaEncryptOaep
         return re.sub(r"-----[^-]+-----|[\s]", "", raw)
 
-    async def abhaPost(self, path: str, payload: dict[str, Any], xToken: str = "") -> dict[str, Any]:
+    async def abhaPost(self, path: str, payload: dict[str, Any], xToken: str = "", extraHeaders: dict[str, str] | None = None) -> dict[str, Any]:
         token = await self._resolveToken()
         if not self.settings.abdmAbhaBase:
             raise AppError(500, ErrorCode.INTERNAL_ERROR, "ABDM ABHA base is not configured")
@@ -200,6 +200,8 @@ class AbdmClient:
         headers = {**self._buildBaseHeaders(), "Authorization": f"Bearer {token}"}
         if xToken:
             headers["X-token"] = f"Bearer {xToken}"
+        if extraHeaders:
+            headers.update(extraHeaders)
         response = await self.client.post(url, json=payload, headers=headers)
         if response.status_code >= 400:
             raise AppError(424, ErrorCode.UPSTREAM_ERROR, "ABDM ABHA request failed", {"statusCode": response.status_code, "body": response.text[:1000]})
